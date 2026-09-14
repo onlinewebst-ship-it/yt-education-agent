@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import yaml
+from dotenv import dotenv_values
 from googleapiclient.discovery import build
 
-from auth import get_credentials
+from auth import load_cached_credentials
 from change_detect import detect_and_log
 from extract import extract_from_transcript, summarize_impact
 from notify import build_email_body, send_email
@@ -28,6 +32,18 @@ from weighting import rebuild
 
 ROOT = Path(__file__).parent
 WINDOW = 5
+
+# Optional plain API key — reads public channel data with no OAuth consent screen.
+_YOUTUBE_API_KEY = dotenv_values(ROOT / ".env").get("YOUTUBE_API_KEY") or os.environ.get(
+    "YOUTUBE_API_KEY"
+)
+
+# Public per-channel Atom feed — no API key, no OAuth, no quota.
+# Exposes the 15 most recent uploads per channel.
+_ATOM = {
+    "a": "http://www.w3.org/2005/Atom",
+    "yt": "http://www.youtube.com/xml/schemas/2015",
+}
 
 
 def _load_channels() -> list[dict]:
@@ -56,22 +72,49 @@ def _latest_videos(yt, uploads_playlist: str, limit: int = WINDOW) -> list[dict]
     ]
 
 
+def _latest_videos_rss(channel_id: str, limit: int = WINDOW) -> list[dict]:
+    """Latest uploads from the public channel Atom feed (credential-free)."""
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0 (yt-education-agent)"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+    root = ET.fromstring(raw)
+    out: list[dict] = []
+    for entry in root.findall("a:entry", _ATOM)[:limit]:
+        vid = entry.findtext("yt:videoId", default="", namespaces=_ATOM)
+        if not vid:
+            continue
+        out.append(
+            {
+                "video_id": vid,
+                "title": entry.findtext("a:title", default="", namespaces=_ATOM),
+                "published_at": entry.findtext("a:published", default="", namespaces=_ATOM),
+            }
+        )
+    return out
+
+
 def process_channel(yt, channel: dict) -> int:
     handle = channel["handle"]
     title = channel["title"]
     print(f"\n=== {title} (@{handle})")
-    videos = _latest_videos(yt, channel["uploads_playlist"], WINDOW)
+    if yt is not None:
+        videos = _latest_videos(yt, channel["uploads_playlist"], WINDOW)
+    else:
+        videos = _latest_videos_rss(channel["id"], WINDOW)
     if not videos:
         print("  no uploads found")
         return 0
     unseen = [v for v in videos if not seen(v["video_id"])]
     transcripts: dict[str, str | None] = {}
     if unseen:
-        print(f"  · fetching {len(unseen)} transcript(s) via Apify...")
+        print(f"  · fetching {len(unseen)} transcript(s)...")
         try:
             transcripts = fetch_transcripts([v["video_id"] for v in unseen])
         except Exception as exc:
-            print(f"  ! Apify transcript fetch failed: {exc}", file=sys.stderr)
+            print(f"  ! transcript fetch failed: {exc}", file=sys.stderr)
     new_count = 0
     for video in videos:
         vid = video["video_id"]
@@ -132,8 +175,8 @@ def process_channel(yt, channel: dict) -> int:
             )
             evolution_tag = " ⚡ EVOLUTION" if change_logged else ""
             subject = f"[YT Education] {title}: {video['title'][:80]}{evolution_tag}"
-            send_email(subject, body)
-            print(f"    ✉  email sent for {vid}")
+            if send_email(subject, body):
+                print(f"    ✉  email sent for {vid}")
         except Exception as exc:
             print(f"    ! email failed: {exc}", file=sys.stderr)
         new_count += 1
@@ -160,8 +203,27 @@ def process_channel(yt, channel: dict) -> int:
 
 
 def run_once() -> int:
-    creds = get_credentials()
-    yt = build("youtube", "v3", credentials=creds)
+    yt = None
+    try:
+        if _YOUTUBE_API_KEY:
+            yt = build("youtube", "v3", developerKey=_YOUTUBE_API_KEY)
+        else:
+            creds = load_cached_credentials()
+            if creds is None:
+                raise RuntimeError(
+                    "no cached OAuth token — run `python auth.py` once, "
+                    "or set YOUTUBE_API_KEY in .env"
+                )
+            yt = build("youtube", "v3", credentials=creds)
+    except Exception as exc:
+        print(
+            f"[info] YouTube Data API unavailable ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
+        print(
+            "[info] falling back to public RSS feeds — no credentials required",
+            file=sys.stderr,
+        )
     total = 0
     for channel in _load_channels():
         total += process_channel(yt, channel)

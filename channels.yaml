@@ -1,5 +1,9 @@
 # YouTube education channels to watch
 # Edit this file to add your own channels.
+#
+# Resolve a handle/URL to a channel ID with:  python tools/resolve_channel.py
+# (channel IDs also work in the public RSS feed form:
+#  https://www.youtube.com/feeds/videos.xml?channel_id=<id>  — handy for checking an ID)
 
 channels:
   - id: "UCmrU1HFPpy5DfUySK6okqEA"
@@ -7,7 +11,7 @@ channels:
     title: "Lewis Jackson"
     uploads_playlist: "UUmrU1HFPpy5DfUySK6okqEA"
 
-  - id: "UCXuqSBlHAE6Xw-yeJA0Tunw"
+  - id: "UCYO_jab_esuFRV4b17AJtAw"
     handle: "3b1b"
     title: "3Blue1Brown"
-    uploads_playlist: "UUxuqSBlHAE6Xw-yeJA0Tunw"
+    uploads_playlist: "UUYO_jab_esuFRV4b17AJtAw"

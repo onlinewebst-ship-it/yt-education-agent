@@ -7,3 +7,5 @@ __pycache__/
 state.db
 channels/
 .DS_Store
+run_live.log
+.test-backup/

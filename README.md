@@ -13,7 +13,7 @@ for each channel in channels.yaml:
   fetch latest 5 video IDs
   for any new video:
     pull transcript
-    Claude extracts concepts / skills / tools / insights
+    the model extracts concepts / skills / tools / insights
     detect knowledge evolution vs prior state → changelog
     re-merge rolling window with recency weighting
     group similar concepts via embedding similarity
@@ -33,9 +33,22 @@ Plus an **email alert** to your inbox whenever:
 
 Newer videos are weighted more heavily, similar concepts are grouped automatically, and knowledge shifts get flagged the moment they happen.
 
+## Zero-credential mode (default)
+
+The pipeline runs end-to-end with **no Google account, no API key and no paid transcript service**. Two fallbacks make that possible:
+
+| Stage | Primary | Fallback (used by default) |
+|-------|---------|----------------------------|
+| Latest videos | YouTube Data API (OAuth or `YOUTUBE_API_KEY`) | Public channel Atom feed — no key, 15 most recent uploads |
+| Transcripts | Apify actor (`APIFY_TOKEN`) | `youtube-transcript-api` — talks to YouTube directly |
+
+So a fresh clone plus a model key is enough to run live. Google credentials and Apify are optional upgrades: set `YOUTUBE_API_KEY` (a plain API key needs no OAuth consent screen) or run `python auth.py` once, and set `APIFY_TOKEN` only if you want Apify's transcript service preferred over the keyless one. Force either transcript provider with `TRANSCRIPT_PROVIDER=apify|keyless`.
+
+Email alerts are also optional — if `SMTP_*` vars are absent the run continues and logs `email alerts off`.
+
 ## What it extracts
 
-For each video, Claude extracts a structured JSON with:
+For each video, the model extracts a structured JSON with:
 
 | Field | What it captures |
 |-------|-----------------|
@@ -51,29 +64,30 @@ For each video, Claude extracts a structured JSON with:
 ## What it costs
 
 - **VPS:** ~£6/month (Hostinger KVM 2 recommended)
-- **Anthropic API:** ~£0.10–£0.50/month for typical use
-- **YouTube Data API:** free
-- **Apify** (transcript fetcher): a few pence/month
+- **Model API:** DeepSeek `deepseek-v4-pro` by default (any OpenAI-compatible endpoint works via `OPENAI_BASE_URL`) — roughly £0.10–£0.50/month for typical use
+- **YouTube Data API / RSS:** free
+- **Transcripts:** free via the keyless path; a few pence/month if you opt into Apify
 - **Email alerts:** free — sent from your own Gmail
 
 ## Repo layout
 
 ```
-auth.py              OAuth flow
+auth.py              Optional OAuth flow (cached token; never blocks the watcher)
 watcher.py           Main 10-min poll loop
-ingest.py            Pull transcript + extract + merge
-extract.py           Claude prompt + JSON schema (education domain)
+ingest.py            Pull transcript + extract + merge (+ credential-free RSS listing)
+extract.py           Model prompt + JSON schema (education domain) + JSON repair
 weighting.py         Recency weighting + similarity grouping
 change_detect.py     Knowledge-evolution detection
 store.py             SQLite + markdown IO
-notify.py            Email sender (Gmail SMTP)
-transcript.py        Apify transcript fetcher
+notify.py            Email sender (Gmail SMTP; skips cleanly when unconfigured)
+transcript.py        Transcript fetcher — Apify with keyless fallback
 channels.yaml        Channels to watch (you edit this)
 scripts/
   bootstrap_vps.sh   One-shot SSH + install onto Hostinger
   watcher.service    systemd unit
 tools/
   resolve_channel.py Handle/URL → channel ID
+  rebuild_docs.py    Re-render knowledge.md/concepts.json from state.db (no model calls)
 channels/<handle>/   Generated docs live here
 ```
 

@@ -95,14 +95,31 @@ def _rebuild_section(section_per_video: list[list[dict]], text_key: str) -> list
     return out
 
 
+def _pick_summary(extractions: list[dict]) -> str:
+    """Headline summary for the document.
+
+    Prefer the newest video that actually yielded teaching content. A degenerate
+    upload (short, music-only, no concepts/skills/insights) would otherwise
+    overwrite the whole document's overview with "this teaches nothing".
+    """
+    for e in extractions:
+        summary = (e.get("video_summary") or "").strip()
+        if summary and any(
+            e.get(k) for k in ("concepts", "skills", "tools_resources", "key_insights")
+        ):
+            return summary
+    for e in extractions:
+        summary = (e.get("video_summary") or "").strip()
+        if summary:
+            return summary
+    return ""
+
+
 def rebuild(extractions_newest_first: Iterable[dict]) -> dict:
     """Build a unified knowledge dict from a rolling window of extractions (newest first)."""
     extractions = list(extractions_newest_first)[: len(WEIGHTS)]
-    summaries = [
-        e.get("video_summary", "") for e in extractions if e.get("video_summary")
-    ]
     return {
-        "knowledge_summary": summaries[0] if summaries else "",
+        "knowledge_summary": _pick_summary(extractions),
         "concepts": _rebuild_section(
             [e.get("concepts") for e in extractions], "concept"
         ),

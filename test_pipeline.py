@@ -1,13 +1,26 @@
 """Test the complete pipeline end-to-end with a mock extraction.
-Uses a real transcript but simulates the Claude call with the actual extraction schema output.
+Uses a real transcript but simulates the model call with the actual extraction
+schema output.
+
+Everything is written to a throwaway sandbox (via YT_EDU_DB_PATH /
+YT_EDU_CHANNELS_DIR) so running the suite can never clobber a live state.db or
+the generated knowledge documents. Set YT_EDU_TEST_DIR to pin the sandbox path.
 """
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
+
+_SANDBOX = Path(
+    os.environ.get("YT_EDU_TEST_DIR") or tempfile.mkdtemp(prefix="yt-edu-test-")
+)
+os.environ["YT_EDU_DB_PATH"] = str(_SANDBOX / "state.db")
+os.environ["YT_EDU_CHANNELS_DIR"] = str(_SANDBOX / "channels")
 
 # Import the modules we want to test
 from store import (
@@ -270,5 +283,5 @@ print(f"  {channel_dir(HANDLE) / 'videos' / f'{v2_id}.md'}")
 print(f"  {concepts_path}")
 print(f"  {knowledge_path}")
 print(f"  {changelog_path}")
-print(f"\nTo run with real Claude extraction, set ANTHROPIC_API_KEY in .env")
-print(f"Then: python ingest.py --once")
+print(f"\nTo run with real extraction, set OPENAI_API_KEY + OPENAI_BASE_URL in .env")
+print("Then: python ingest.py --once")

@@ -21,7 +21,7 @@ You are talking to a non-technical user on **macOS**. Be warm, kind, and patient
 A small program that lives on a £6/month cloud computer and:
 - Watches the YouTube education channels they pick
 - Always keeps the **5 most recent videos** in view per channel
-- Reads each video's transcript, sends it to Claude, and pulls out: **concepts, skills, tools, key insights, and practical applications**
+- Reads each video's transcript, sends it to the extraction model, and pulls out: **concepts, skills, tools, key insights, and practical applications**
 - Weights newer videos more heavily so the knowledge doc reflects current understanding
 - Writes everything to clean Markdown files, grouped by channel
 - Notices when knowledge **evolves** — new info contradicts or refines prior understanding — and logs it to a changelog
@@ -37,34 +37,56 @@ Check (and install via Homebrew if missing): `python3.11`, `git`, `gh`. Run `bre
 
 ### Step 2 — Clone the repo
 ```
-git clone https://github.com/jackson-video-resources/yt-education-agent ~/yt-education-agent
+git clone https://github.com/onlinewebst-ship-it/yt-education-agent ~/yt-education-agent
 cd ~/yt-education-agent
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 3 — Anthropic API key
-Run `open "https://console.anthropic.com/settings/keys"` so the keys page launches in their browser right now. Tell them: "On that page: click **Create Key**, name it `yt-education-agent`, copy the key, paste it back to me here." When they paste, write it to `.env` as `ANTHROPIC_API_KEY=...`.
+### Step 3 — Model API key (the only required credential)
 
-### Step 4 — Google Cloud + YouTube Data API
-Walk them through this sequence, opening each tab as they finish the previous step:
+The pipeline talks to any OpenAI-compatible endpoint. Default is DeepSeek; anything that speaks `/chat/completions` works.
+
+Run `open "https://platform.deepseek.com/api_keys"` so the keys page launches in their browser right now. Tell them: "On that page: click **Create API key**, name it `yt-education-agent`, copy the key, paste it back to me here." When they paste, write three lines to `.env`:
+
+```
+OPENAI_API_KEY=<their key>
+OPENAI_BASE_URL=https://api.deepseek.com
+EXTRACTION_MODEL=deepseek-v4-pro
+```
+
+That is the whole credential requirement — Steps 4, 5 and 7 are optional. Skip straight to Step 6 unless they want the upgrades.
+
+### Step 4 — (Optional) YouTube Data API
+
+**Not needed.** By default the agent lists new uploads from each channel's public Atom feed, which requires no Google account, no API key and no quota. Only do this if they specifically want the official API (e.g. for uploads beyond the feed's 15 most recent):
+
+The easy route is a plain API key — it needs **no OAuth consent screen and no test users**, so it dodges the "app has not completed verification" wall entirely:
 
 1. `open "https://console.cloud.google.com/projectcreate"` → name it `yt-education-agent`, click Create. Wait for them to confirm.
 2. `open "https://console.cloud.google.com/apis/library/youtube.googleapis.com"` → click Enable.
-3. `open "https://console.cloud.google.com/apis/credentials/consent"` → External, app name `yt-education-agent`, their email, save. On the test users page add their own Google account.
-4. `open "https://console.cloud.google.com/apis/credentials"` → Create Credentials → OAuth client ID → **Desktop app** → name `yt-education-agent` → Create → Download JSON.
-5. Tell them: "When the file finishes downloading, drag it into this Terminal window and press Enter — I'll move it to the right place." Then `mv "<dropped-path>" ~/yt-education-agent/client_secret.json`.
+3. `open "https://console.cloud.google.com/apis/credentials"` → Create Credentials → **API key** → copy it.
+4. Append `YOUTUBE_API_KEY=<key>` to `.env`.
 
-### Step 5 — Run the OAuth flow
-Run `python auth.py`. It opens their browser, they sign in with Google, approve, and `token.pickle` is written. Tell them: "If you see a 'Google hasn't verified this app' warning, click Advanced → Go to yt-education-agent. That's expected — it's your own app."
+### Step 5 — (Optional) OAuth instead of an API key
+
+Skip this unless they ask for it. If they do, it depends on the consent screen: the app must be in **Testing** with their Google account listed under **Test users**, otherwise Google blocks sign-in with "Access blocked: … has not completed the Google verification process". Get the flow to completion and `token.pickle` is written:
+
+1. `open "https://console.cloud.google.com/apis/credentials"` → Create Credentials → OAuth client ID → **Desktop app** → name `yt-education-agent` → Create → Download JSON, then move it to `client_secret.json` in the repo root.
+2. `open "https://console.cloud.google.com/apis/credentials/consent"` → **Audience** → add their Google account under **Test users** → Save.
+3. Run `python auth.py`. It opens their browser; they approve and `token.pickle` is written. Tell them: "If you see a 'Google hasn't verified this app' warning, click Advanced → Go to yt-education-agent. That's expected — it's your own app."
+
+Note: `ingest.py` never waits on this flow. With no cached token it logs a line and falls back to the RSS feed, so a missing token can't hang the watcher.
 
 ### Step 6 — Pick channels to watch
 Ask: "Which educational YouTubers do you want to follow? Coding tutorials, math, science, design, business — whatever you're learning. Send me their channel URLs or @handles, one per line." For each, run `python tools/resolve_channel.py "<input>"` to convert to a channel ID, then write all of them to `channels.yaml`.
 
-### Step 7 — Apify token (transcripts) + smoke test
+### Step 7 — (Optional but recommended on a VPS) Apify token, then smoke test
 
-Transcripts are fetched via Apify — it handles the IP rotation YouTube needs, costs a few pence per month for typical use, and works perfectly from a cloud server.
+Transcripts work out of the box with `youtube-transcript-api`, which needs no account. **It is rate-limited by IP:** a handful of fetches is fine from a home connection, but YouTube starts answering `IpBlocked` after roughly a dozen rapid requests, and datacentre IPs are throttled harder. The agent spaces requests out, retries with backoff, and aborts the batch cleanly on a block (unstored videos are retried next pass) — but on a 10-minute poll loop a cloud server will want Apify, which handles the IP rotation.
+
+To enable it:
 
 1. Run `open "https://apify.com?fpr=3ly3yd"` to launch the signup page in their browser.
 2. Tell them: "Sign up (Google login is fastest), then go to **Settings → Integrations → API tokens** and copy the token. Paste it back to me."
@@ -72,11 +94,12 @@ Transcripts are fetched via Apify — it handles the IP rotation YouTube needs, 
    ```
    APIFY_TOKEN=apify_api_xxxxxxxxxxxx
    ```
+   Apify is then preferred automatically. Force a provider with `TRANSCRIPT_PROVIDER=apify|keyless`, or point the keyless path at a proxy with `TRANSCRIPT_PROXY=http://user:pass@host:port`.
 4. Run `python ingest.py --once`. Show them the first `knowledge.md` as it gets generated. Celebrate.
 
-### Step 8 — Email alerts (via Gmail Connection)
+### Step 8 — (Optional) Email alerts (via Gmail Connection)
 
-Alerts go to email, sent from the user's own Gmail address. Setup is dead simple:
+Skip if they only want the markdown files. Alerts go to email, sent from the user's own Gmail address. Setup is dead simple:
 
 1. **Make sure Gmail is connected in Claude Code.** Tell the user: "Open the Settings icon (top-right of Claude Code) → **Connectors** → find **Gmail** → click **Connect** → sign in with the Google account you want alerts to come from. Then say 'done'."
    Once they say done, check your own toolset for `mcp__*Gmail*` tools to confirm. If they're not there, walk through the Connector flow again — it's the only path that matters here.
@@ -139,8 +162,8 @@ End with: "You're done. Your personal learning librarian is live 24/7. Go enjoy 
 yt-education-agent/
   auth.py                  OAuth flow, refreshes token.pickle
   watcher.py               Long-running 10-min poll loop
-  ingest.py                Pull transcript + Claude extract + merge
-  extract.py               Claude prompt + JSON schema (education domain, with prompt caching)
+  ingest.py                Pull transcript + extract + merge (RSS fallback for uploads)
+  extract.py               Model prompt + JSON schema (education domain) + JSON truncation repair
   weighting.py             Recency weighting + similarity grouping
   change_detect.py         Knowledge-evolution detection
   store.py                 SQLite + markdown IO
@@ -159,7 +182,7 @@ yt-education-agent/
     videos/<id>.md         Per-video extracted notes
 ```
 
-### Extraction schema (Claude returns JSON)
+### Extraction schema (model returns JSON)
 ```json
 {
   "video_summary": "string — 2-4 sentences describing what this video teaches",
@@ -221,7 +244,7 @@ For each concept/skill, `effective_confidence = mean(confidence_i * weight_i)` a
 On each new video, compare new extraction vs current `concepts.json`:
 - Any new concept contradicting an existing high-confidence concept → log shift
 - `video_summary` semantic distance > `0.35` from prior → log shift
-- `knowledge_evolution.changed == true` from Claude → log shift
+- `knowledge_evolution.changed == true` from the model → log shift
 
 Append to `changelog.md`:
 ```
@@ -258,17 +281,19 @@ sleep(600)
 
 ### Cost note (tell the user once)
 - Hostinger KVM 2: ~£6/mo
-- Anthropic API: ~£0.10–£0.50/mo at 1–3 channels (cached system prompt + transcripts)
-- YouTube Data API: free tier is enough
+- Model API: ~£0.10–£0.50/mo at 1–3 channels (DeepSeek by default, any OpenAI-compatible endpoint)
+- Uploads + transcripts: free (public RSS feed + `youtube-transcript-api`); optional Apify is a few pence/mo and is the reliable choice on a VPS IP
+- YouTube Data API: optional, free tier is plenty
+- Email alerts: free (own Gmail app password)
 
 ---
 
 ## Code the agent must generate
 
 The agent should write every file in the repo layout above. Use:
-- `google-api-python-client`, `google-auth-oauthlib` for YouTube + OAuth
-- Apify (`karamelo/youtube-transcripts`) for transcripts. Auth via `APIFY_TOKEN` in `.env`. Signup link: `https://apify.com?fpr=3ly3yd`
-- `anthropic` SDK with `claude-opus-4-7`, prompt caching enabled on the system prompt
+- `httpx` against any OpenAI-compatible `/chat/completions` endpoint (`OPENAI_BASE_URL`, `OPENAI_API_KEY`, `EXTRACTION_MODEL`), so DeepSeek/OpenRouter/OpenAI all work
+- `google-api-python-client` + `google-auth-oauthlib` are optional: only for the official YouTube Data API (`YOUTUBE_API_KEY` or a cached OAuth token). The default path is the public channel Atom feed in `ingest.py` (`_latest_videos_rss`)
+- Transcripts: `youtube-transcript-api` keyless by default; optional Apify (`karamelo/youtube-transcripts`) via `APIFY_TOKEN`. Signup link: `https://apify.com?fpr=3ly3yd`
 - `sentence-transformers` (`all-MiniLM-L6-v2`) for similarity grouping
 - `pyyaml`, `python-dotenv`
 - `sqlite3` (stdlib) for state

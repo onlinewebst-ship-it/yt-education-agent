@@ -118,8 +118,14 @@ def build_email_body(
     return "\n".join(sections)
 
 
-def send_email(subject: str, body: str) -> None:
-    cfg = _cfg()
+def send_email(subject: str, body: str) -> bool:
+    """Send a brief. Returns False (without raising) when SMTP isn't configured,
+    so an alert-less deployment still runs the full pipeline."""
+    try:
+        cfg = _cfg()
+    except RuntimeError as exc:
+        print(f"    (email alerts off — {exc})")
+        return False
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = cfg["SMTP_USER"]
@@ -130,3 +136,4 @@ def send_email(subject: str, body: str) -> None:
         server.starttls(context=context)
         server.login(cfg["SMTP_USER"], cfg["SMTP_PASSWORD"])
         server.send_message(msg)
+    return True

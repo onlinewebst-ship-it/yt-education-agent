@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).parent
-DB_PATH = ROOT / "state.db"
-CHANNELS_DIR = ROOT / "channels"
+# Overridable so tests (and dry runs) can work in a throwaway directory instead
+# of clobbering a live state.db and generated documents.
+DB_PATH = Path(os.environ.get("YT_EDU_DB_PATH") or ROOT / "state.db")
+CHANNELS_DIR = Path(os.environ.get("YT_EDU_CHANNELS_DIR") or ROOT / "channels")
 
 
 def _db() -> sqlite3.Connection:
