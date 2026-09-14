@@ -14,15 +14,20 @@ MIN_EFFECTIVE_CONFIDENCE = 0.30
 
 @lru_cache(maxsize=1)
 def _model():
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    try:
+        from sentence_transformers import SentenceTransformer
+        return SentenceTransformer("all-MiniLM-L6-v2")
+    except (ImportError, OSError):
+        return None
 
 
 def _embed(texts: list[str]) -> np.ndarray:
     if not texts:
         return np.zeros((0, 384))
-    return _model().encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    m = _model()
+    if m is None:
+        return np.zeros((len(texts), 384))
+    return m.encode(texts, normalize_embeddings=True, show_progress_bar=False)
 
 
 def _group(items: list[dict], text_key: str) -> list[list[dict]]:
@@ -91,23 +96,23 @@ def _rebuild_section(section_per_video: list[list[dict]], text_key: str) -> list
 
 
 def rebuild(extractions_newest_first: Iterable[dict]) -> dict:
-    """Build a unified rules dict from a rolling window of extractions (newest first)."""
+    """Build a unified knowledge dict from a rolling window of extractions (newest first)."""
     extractions = list(extractions_newest_first)[: len(WEIGHTS)]
     summaries = [
-        e.get("strategy_summary", "") for e in extractions if e.get("strategy_summary")
+        e.get("video_summary", "") for e in extractions if e.get("video_summary")
     ]
     return {
-        "strategy_summary": summaries[0] if summaries else "",
-        "buy_rules": _rebuild_section(
-            [e.get("buy_rules") for e in extractions], "rule"
+        "knowledge_summary": summaries[0] if summaries else "",
+        "concepts": _rebuild_section(
+            [e.get("concepts") for e in extractions], "concept"
         ),
-        "sell_rules": _rebuild_section(
-            [e.get("sell_rules") for e in extractions], "rule"
+        "skills": _rebuild_section(
+            [e.get("skills") for e in extractions], "skill"
         ),
-        "risk_notes": _rebuild_section(
-            [e.get("risk_notes") for e in extractions], "note"
+        "applications": _rebuild_section(
+            [e.get("practical_applications") for e in extractions], "application"
         ),
-        "timing_notes": _rebuild_section(
-            [e.get("timing_notes") for e in extractions], "note"
+        "insights": _rebuild_section(
+            [e.get("key_insights") for e in extractions], "insight"
         ),
     }

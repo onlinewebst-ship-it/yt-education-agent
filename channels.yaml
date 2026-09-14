@@ -1,9 +1,13 @@
+# YouTube education channels to watch
+# Edit this file to add your own channels.
+
 channels:
-  - id: UCK-zlnUfoDHzUwXcbddtnkg
-    handle: arkinvest2015
-    title: ARK Invest
-    uploads_playlist: UUK-zlnUfoDHzUwXcbddtnkg
-  - id: UCia6oYbLKo8fLOguATpACmA
-    handle: bcbacker
-    title: Blockchain Backer
-    uploads_playlist: UUia6oYbLKo8fLOguATpACmA
+  - id: "UCmrU1HFPpy5DfUySK6okqEA"
+    handle: "LewisWJackson"
+    title: "Lewis Jackson"
+    uploads_playlist: "UUmrU1HFPpy5DfUySK6okqEA"
+
+  - id: "UCXuqSBlHAE6Xw-yeJA0Tunw"
+    handle: "3b1b"
+    title: "3Blue1Brown"
+    uploads_playlist: "UUxuqSBlHAE6Xw-yeJA0Tunw"

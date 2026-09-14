@@ -1,4 +1,4 @@
-"""SMTP email sender for per-video briefs."""
+"""SMTP email sender for per-video briefs — education/skills domain."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Iterable
 
 from dotenv import dotenv_values
 
@@ -29,18 +28,18 @@ def _cfg() -> dict[str, str]:
     return cfg
 
 
-def _format_rules(rules: list[dict], top: int = 5) -> str:
-    if not rules:
+def _format_items(items: list[dict], top: int = 5) -> str:
+    if not items:
         return "_(none)_"
     lines = []
-    for r in rules[:top]:
-        text = r.get("text") or r.get("rule") or r.get("note") or ""
+    for r in items[:top]:
+        text = r.get("text") or r.get("rule") or r.get("note") or r.get("concept") or r.get("skill") or ""
         conf = r.get("effective_confidence", r.get("confidence", 0.0))
         lines.append(f"  • ({conf:.2f}) {text}")
     return "\n".join(lines)
 
 
-def _diff_rule_sets(prior: list[dict], new: list[dict]) -> tuple[list[str], list[str]]:
+def _diff_sections(prior: list[dict], new: list[dict]) -> tuple[list[str], list[str]]:
     """Return (added_texts, removed_texts) by simple text equality."""
     prior_texts = {(r.get("text") or "").strip() for r in (prior or [])}
     new_texts = {(r.get("text") or "").strip() for r in (new or [])}
@@ -54,73 +53,67 @@ def build_email_body(
     channel_handle: str,
     video: dict,
     extraction: dict,
-    prior_rules: dict | None,
-    new_rules: dict,
+    prior_knowledge: dict | None,
+    new_knowledge: dict,
     change_logged: bool,
     impact_paragraph: str,
-    strategy_spec: str | None,
 ) -> str:
     vid = video["video_id"]
     url = f"https://www.youtube.com/watch?v={vid}"
-    summary = (extraction.get("strategy_summary") or "").strip() or "_(none)_"
+    summary = (extraction.get("video_summary") or "").strip() or "_(none)_"
     sections: list[str] = []
     sections.append(
         f"NEW VIDEO — {channel_title}\n{video['title']}\n{url}\nPublished: {video.get('published_at','?')}\n"
     )
     if change_logged:
-        sections.append("⚠️  STRATEGY SHIFT DETECTED — see changelog.md\n")
-    sections.append(f"IMPACT ON TRADING STRATEGY\n{impact_paragraph}\n")
-    sections.append(f"WHAT THIS VIDEO SAYS\n{summary}\n")
+        sections.append("⚡  KNOWLEDGE EVOLUTION DETECTED — see changelog.md\n")
+    sections.append(f"IMPACT ON KNOWLEDGE BASE\n{impact_paragraph}\n")
+    sections.append(f"WHAT THIS VIDEO TEACHES\n{summary}\n")
     sections.append(
         "KEY EXTRACTS FROM THIS VIDEO\n"
-        f"Buy rules:\n{_format_rules(extraction.get('buy_rules', []), top=3)}\n\n"
-        f"Sell rules:\n{_format_rules(extraction.get('sell_rules', []), top=3)}\n\n"
-        f"Risk notes:\n{_format_rules(extraction.get('risk_notes', []), top=2)}\n\n"
-        f"Timing notes:\n{_format_rules(extraction.get('timing_notes', []), top=2)}\n"
+        f"Concepts:\n{_format_items(extraction.get('concepts', []), top=3)}\n\n"
+        f"Skills:\n{_format_items(extraction.get('skills', []), top=3)}\n\n"
+        f"Tools & resources:\n{_format_items(extraction.get('tools_resources', []), top=2)}\n\n"
+        f"Key insights:\n{_format_items(extraction.get('key_insights', []), top=2)}\n"
     )
-    if prior_rules is not None:
-        added_buy, removed_buy = _diff_rule_sets(
-            prior_rules.get("buy_rules", []), new_rules.get("buy_rules", [])
+    if prior_knowledge is not None:
+        added_concepts, removed_concepts = _diff_sections(
+            prior_knowledge.get("concepts", []), new_knowledge.get("concepts", [])
         )
-        added_sell, removed_sell = _diff_rule_sets(
-            prior_rules.get("sell_rules", []), new_rules.get("sell_rules", [])
+        added_skills, removed_skills = _diff_sections(
+            prior_knowledge.get("skills", []), new_knowledge.get("skills", [])
         )
         diff_lines: list[str] = []
-        if added_buy:
-            diff_lines.append("  + buy rule: " + "\n  + buy rule: ".join(added_buy))
-        if removed_buy:
-            diff_lines.append("  − buy rule: " + "\n  − buy rule: ".join(removed_buy))
-        if added_sell:
-            diff_lines.append("  + sell rule: " + "\n  + sell rule: ".join(added_sell))
-        if removed_sell:
-            diff_lines.append(
-                "  − sell rule: " + "\n  − sell rule: ".join(removed_sell)
-            )
+        if added_concepts:
+            diff_lines.append("  + concept: " + "\n  + concept: ".join(added_concepts))
+        if removed_concepts:
+            diff_lines.append("  − concept: " + "\n  − concept: ".join(removed_concepts))
+        if added_skills:
+            diff_lines.append("  + skill: " + "\n  + skill: ".join(added_skills))
+        if removed_skills:
+            diff_lines.append("  − skill: " + "\n  − skill: ".join(removed_skills))
         sections.append(
-            "WHAT CHANGED IN THE ROLLING RULES\n"
+            "WHAT CHANGED IN THE ROLLING KNOWLEDGE BASE\n"
             + (
                 "\n".join(diff_lines)
                 if diff_lines
-                else "  (no rule-level changes; weighting may have shifted confidence)"
+                else "  (no knowledge-level changes; weighting may have shifted confidence)"
             )
             + "\n"
         )
     sections.append(
-        "CURRENT ROLLING STRATEGY\n"
-        f"Summary: {(new_rules.get('strategy_summary') or '').strip() or '(building)'}\n\n"
-        f"Top buy rules:\n{_format_rules(new_rules.get('buy_rules', []), top=5)}\n\n"
-        f"Top risk notes:\n{_format_rules(new_rules.get('risk_notes', []), top=3)}\n"
+        "CURRENT KNOWLEDGE BASE\n"
+        f"Summary: {(new_knowledge.get('knowledge_summary') or '').strip() or '(building)'}\n\n"
+        f"Top concepts:\n{_format_items(new_knowledge.get('concepts', []), top=5)}\n\n"
+        f"Top skills:\n{_format_items(new_knowledge.get('skills', []), top=3)}\n\n"
+        f"Key insights:\n{_format_items(new_knowledge.get('insights', []), top=3)}\n"
     )
-    if strategy_spec:
-        sections.append(
-            "LIVE PAPER-TRADING SPEC (current)\n" + strategy_spec.strip() + "\n"
-        )
     sections.append(
         "FILES ON THE VPS\n"
-        f"  channels/{channel_handle}/strategy.md      — full living strategy\n"
-        f"  channels/{channel_handle}/strategy_spec.md — paper-trading spec (if applicable)\n"
-        f"  channels/{channel_handle}/changelog.md     — strategy shifts log\n"
-        f"  channels/{channel_handle}/videos/{vid}.md  — this video's full extract\n"
+        f"  channels/{channel_handle}/knowledge.md      — full living knowledge document\n"
+        f"  channels/{channel_handle}/concepts.json      — structured concepts with confidence\n"
+        f"  channels/{channel_handle}/changelog.md       — knowledge evolution log\n"
+        f"  channels/{channel_handle}/videos/{vid}.md    — this video's full extract\n"
     )
     return "\n".join(sections)
 

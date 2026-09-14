@@ -18,10 +18,10 @@ from store import (
     channel_dir,
     latest_extractions,
     mark_seen,
-    read_rules_json,
+    read_concepts_json,
     seen,
-    write_rules_json,
-    write_strategy_md,
+    write_concepts_json,
+    write_knowledge_md,
     write_video_md,
 )
 from weighting import rebuild
@@ -88,7 +88,7 @@ def process_channel(yt, channel: dict) -> int:
         except Exception as exc:
             print(f"    ! extraction failed: {exc}")
             continue
-        prior_rules = read_rules_json(handle)
+        prior_knowledge = read_concepts_json(handle)
         write_video_md(handle, vid, video["title"], video["published_at"], extraction)
         change_logged = detect_and_log(handle, vid, video["title"], extraction)
         mark_seen(
@@ -100,12 +100,12 @@ def process_channel(yt, channel: dict) -> int:
             extraction,
         )
         extractions = latest_extractions(channel["id"], WINDOW)
-        new_rules = rebuild([e["extraction"] for e in extractions])
-        write_rules_json(handle, new_rules)
-        write_strategy_md(
+        new_knowledge = rebuild([e["extraction"] for e in extractions])
+        write_concepts_json(handle, new_knowledge)
+        write_knowledge_md(
             handle,
             title,
-            new_rules,
+            new_knowledge,
             sources=[
                 {
                     "video_id": e["video_id"],
@@ -115,10 +115,8 @@ def process_channel(yt, channel: dict) -> int:
                 for e in extractions
             ],
         )
-        spec_path = channel_dir(handle) / "strategy_spec.md"
-        spec_text = spec_path.read_text() if spec_path.exists() else None
         try:
-            impact = summarize_impact(extraction, video["title"], spec_text)
+            impact = summarize_impact(extraction, video["title"], None)
         except Exception as exc:
             impact = f"(impact summary failed: {exc})"
         try:
@@ -127,14 +125,13 @@ def process_channel(yt, channel: dict) -> int:
                 channel_handle=handle,
                 video=video,
                 extraction=extraction,
-                prior_rules=prior_rules,
-                new_rules=new_rules,
+                prior_knowledge=prior_knowledge,
+                new_knowledge=new_knowledge,
                 change_logged=change_logged,
                 impact_paragraph=impact,
-                strategy_spec=spec_text,
             )
-            shift_tag = " ⚠ SHIFT" if change_logged else ""
-            subject = f"[YT Strategy] {title}: {video['title'][:80]}{shift_tag}"
+            evolution_tag = " ⚡ EVOLUTION" if change_logged else ""
+            subject = f"[YT Education] {title}: {video['title'][:80]}{evolution_tag}"
             send_email(subject, body)
             print(f"    ✉  email sent for {vid}")
         except Exception as exc:
@@ -142,13 +139,13 @@ def process_channel(yt, channel: dict) -> int:
         new_count += 1
     if new_count == 0:
         extractions = latest_extractions(channel["id"], WINDOW)
-        if extractions and not (channel_dir(handle) / "strategy.md").exists():
-            rules = rebuild([e["extraction"] for e in extractions])
-            write_rules_json(handle, rules)
-            write_strategy_md(
+        if extractions and not (channel_dir(handle) / "knowledge.md").exists():
+            knowledge = rebuild([e["extraction"] for e in extractions])
+            write_concepts_json(handle, knowledge)
+            write_knowledge_md(
                 handle,
                 title,
-                rules,
+                knowledge,
                 sources=[
                     {
                         "video_id": e["video_id"],
@@ -178,4 +175,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     new = run_once()
-    print(f"\nDone. {new} new video(s) processed.")
+    print(f"\nDone. {new} new video(s) processed.\n")

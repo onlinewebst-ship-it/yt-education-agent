@@ -1,4 +1,4 @@
-"""SQLite state + markdown IO."""
+"""SQLite state + markdown IO — education/skills domain."""
 
 from __future__ import annotations
 
@@ -95,66 +95,117 @@ def write_video_md(
         "",
         f"- Video: https://www.youtube.com/watch?v={video_id}",
         f"- Published: {published_at}",
+        f"- Target audience: {extraction.get('audience', {}).get('target_level', '?')}",
+        f"- Duration: {extraction.get('audience', {}).get('estimated_duration_minutes', '?')} min",
         "",
-        "## Strategy summary",
-        extraction.get("strategy_summary", "").strip() or "_(none)_",
+        "## Summary",
+        extraction.get("video_summary", "").strip() or "_(none)_",
         "",
     ]
-    for section, key in [
-        ("Buy rules", "buy_rules"),
-        ("Sell rules", "sell_rules"),
-        ("Risk notes", "risk_notes"),
-        ("Timing notes", "timing_notes"),
-    ]:
-        items = extraction.get(key) or []
-        lines.append(f"## {section}")
-        if not items:
-            lines.append("_(none)_")
-        for item in items:
-            text = item.get("rule") or item.get("note") or ""
-            conf = item.get("confidence", 0.0)
-            quote = (item.get("source_quote") or "").strip()
-            lines.append(f"- ({conf:.2f}) {text}")
-            if quote:
-                lines.append(f"  > {quote}")
-        lines.append("")
-    trades = extraction.get("executed_trades") or []
-    lines.append("## Executed trades")
-    if not trades:
+
+    # Concepts
+    concepts = extraction.get("concepts") or []
+    lines.append("## Concepts taught")
+    if not concepts:
         lines.append("_(none)_")
-    for t in trades:
-        lines.append(
-            f"- {t.get('asset','?')} {t.get('direction','?')} entry {t.get('entry','?')} "
-            f"exit {t.get('exit','?')} → {t.get('outcome','?')}"
-        )
+    for item in concepts:
+        conf = item.get("confidence", 0.0)
+        name = item.get("concept", "?")
+        defn = item.get("definition", "")
+        prereqs = item.get("prerequisites") or []
+        related = item.get("related_concepts") or []
+        quote = (item.get("source_quote") or "").strip()
+        lines.append(f"- ({conf:.2f}) **{name}**: {defn}")
+        if prereqs:
+            lines.append(f"  - Prerequisites: {', '.join(prereqs)}")
+        if related:
+            lines.append(f"  - Related: {', '.join(related)}")
+        if quote:
+            lines.append(f"  > {quote}")
+    lines.append("")
+
+    # Skills
+    skills = extraction.get("skills") or []
+    lines.append("## Skills taught")
+    if not skills:
+        lines.append("_(none)_")
+    for item in skills:
+        conf = item.get("confidence", 0.0)
+        name = item.get("skill", "?")
+        steps = item.get("steps") or []
+        diff = item.get("difficulty", "?")
+        prereqs = item.get("prerequisites", "")
+        tools = item.get("tools_needed") or []
+        quote = (item.get("source_quote") or "").strip()
+        lines.append(f"- ({conf:.2f}) **{name}** (difficulty: {diff})")
+        if prereqs:
+            lines.append(f"  - Prerequisites: {prereqs}")
+        if tools:
+            lines.append(f"  - Tools: {', '.join(tools)}")
+        if steps:
+            lines.append(f"  - Steps:")
+            for s in steps:
+                lines.append(f"    {s}")
+        if quote:
+            lines.append(f"  > {quote}")
+    lines.append("")
+
+    # Tools & resources
+    tools_res = extraction.get("tools_resources") or []
+    lines.append("## Tools & resources mentioned")
+    if not tools_res:
+        lines.append("_(none)_")
+    for item in tools_res:
+        t = item.get("type", "tool")
+        name = item.get("name", "?")
+        desc = item.get("description", "")
+        url = item.get("url_or_how_to_find", "")
+        lines.append(f"- **{name}** ({t}): {desc}" + (f" — {url}" if url else ""))
+    lines.append("")
+
+    # Key insights
+    insights = extraction.get("key_insights") or []
+    lines.append("## Key insights")
+    if not insights:
+        lines.append("_(none)_")
+    for item in insights:
+        imp = item.get("importance", 5)
+        insight = item.get("insight", "")
+        conf = item.get("confidence", 0.0)
+        quote = (item.get("source_quote") or "").strip()
+        lines.append(f"- [重要度{imp}] ({conf:.2f}) {insight}")
+        if quote:
+            lines.append(f"  > {quote}")
+    lines.append("")
+
     path.write_text("\n".join(lines) + "\n")
 
 
-def write_strategy_md(
-    handle: str, title: str, rules: dict, sources: Iterable[dict]
+def write_knowledge_md(
+    handle: str, title: str, knowledge: dict, sources: Iterable[dict]
 ) -> None:
-    path = channel_dir(handle) / "strategy.md"
+    path = channel_dir(handle) / "knowledge.md"
     lines = [
-        f"# {title} — Living Strategy",
+        f"# {title} — Living Knowledge Document",
         "",
         f"_Last updated: {datetime.now(timezone.utc).isoformat(timespec='seconds')}_",
         "",
-        "## Strategy summary",
-        rules.get("strategy_summary", "").strip() or "_(building — needs more videos)_",
+        "## Overview",
+        knowledge.get("knowledge_summary", "").strip() or "_(building — needs more videos)_",
         "",
     ]
     for section, key in [
-        ("Buy rules", "buy_rules"),
-        ("Sell rules", "sell_rules"),
-        ("Risk notes", "risk_notes"),
-        ("Timing notes", "timing_notes"),
+        ("Core concepts", "concepts"),
+        ("Skills inventory", "skills"),
+        ("Practical applications", "applications"),
+        ("Key insights", "insights"),
     ]:
-        items = rules.get(key) or []
+        items = knowledge.get(key) or []
         lines.append(f"## {section}")
         if not items:
             lines.append("_(none yet)_")
         for item in items:
-            lines.append(f"- ({item['effective_confidence']:.2f}) {item['text']}")
+            lines.append(f"- ({item.get('effective_confidence', 0):.2f}) {item.get('text', '')}")
         lines.append("")
     lines.append("## Sources (rolling 5-video window)")
     for s in sources:
@@ -164,12 +215,12 @@ def write_strategy_md(
     path.write_text("\n".join(lines) + "\n")
 
 
-def write_rules_json(handle: str, rules: dict) -> None:
-    (channel_dir(handle) / "rules.json").write_text(json.dumps(rules, indent=2))
+def write_concepts_json(handle: str, concepts: dict) -> None:
+    (channel_dir(handle) / "concepts.json").write_text(json.dumps(concepts, indent=2))
 
 
-def read_rules_json(handle: str) -> dict | None:
-    p = channel_dir(handle) / "rules.json"
+def read_concepts_json(handle: str) -> dict | None:
+    p = channel_dir(handle) / "concepts.json"
     if not p.exists():
         return None
     return json.loads(p.read_text())
@@ -177,6 +228,6 @@ def read_rules_json(handle: str) -> dict | None:
 
 def append_changelog(handle: str, entry: str) -> None:
     p = channel_dir(handle) / "changelog.md"
-    header = "" if p.exists() else "# Strategy changelog\n\n"
+    header = "" if p.exists() else "# Knowledge evolution changelog\n\n"
     with p.open("a") as fh:
         fh.write(header + entry + "\n")

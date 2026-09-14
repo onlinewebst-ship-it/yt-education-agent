@@ -1,72 +1,60 @@
-# YT Strategy Agent
+# YT Education Agent
 
-A 24/7 system that watches a list of YouTube channels and turns the last 5 videos from each into a living trading-strategy document — automatically updated as new videos drop.
+A 24/7 system that watches educational YouTube channels and turns the latest videos into a **living knowledge document** — automatically updated as new videos drop.
+
+Forked from [yt-strategy-agent](https://github.com/jackson-video-resources/yt-strategy-agent). The architecture is the same modular pipeline; the extraction schema is adapted from trading strategies to **concepts, skills, tools, and insights**.
+
+## How it works
+
+Every 10 minutes:
+
+```
+for each channel in channels.yaml:
+  fetch latest 5 video IDs
+  for any new video:
+    pull transcript
+    Claude extracts concepts / skills / tools / insights
+    detect knowledge evolution vs prior state → changelog
+    re-merge rolling window with recency weighting
+    group similar concepts via embedding similarity
+```
 
 For every channel you watch, you get:
-- **strategy.md** — the deduced strategy in plain English
-- **rules.json** — structured buy rules, sell rules, risk notes, timing notes
-- **changelog.md** — append-only log of when the strategy shifts
-- **trades.md** — executed trades the host called out
-- **videos/<id>.md** — per-video extracted notes + transcript
 
-Plus an **email alert** to your inbox (sent from your own Gmail) whenever:
+- **knowledge.md** — the accumulated knowledge base as a plain-English document
+- **concepts.json** — structured concept map with confidence scores, prerequisites, and related concepts
+- **changelog.md** — append-only log of when understanding evolves (contradictions, refinements, skill progressions)
+- **videos/*.md** — per-video extraction notes with full detail
+
+Plus an **email alert** to your inbox whenever:
 - a new video drops
-- the deduced strategy shifts
-- a new trade is called out
+- the knowledge base detects an evolution (new concept contradicting prior, skill progression)
+- a genuinely new insight emerges
 
-Newer videos are weighted more heavily, similar rules are grouped automatically, and strategy changes get flagged the moment they happen.
+Newer videos are weighted more heavily, similar concepts are grouped automatically, and knowledge shifts get flagged the moment they happen.
 
-## How to set it up
+## What it extracts
 
-This repo is designed to be set up by an AI agent walking you through it.
+For each video, Claude extracts a structured JSON with:
 
-1. Install [Claude Code](https://claude.com/claude-code) (or any agent CLI of your choice).
-2. Make a fresh empty folder, `cd` into it, start Claude Code.
-3. Paste the entire contents of [`PROMPT.md`](./PROMPT.md) as your first message.
-4. Follow along — the agent opens browser tabs, runs commands, and gets you live in about 20 minutes.
-
-> Currently macOS only. Windows and Linux versions coming.
+| Field | What it captures |
+|-------|-----------------|
+| `video_summary` | 2-4 sentence overview of what the video teaches |
+| `concepts` | Concepts taught, definitions, prerequisites, related concepts |
+| `skills` | Step-by-step skills/techniques, difficulty level, tools needed |
+| `tools_resources` | Tools, libraries, papers, or references mentioned |
+| `practical_applications` | Real-world use cases |
+| `key_insights` | Non-obvious takeaways and mental models |
+| `knowledge_evolution` | Whether this video contradicts or extends prior knowledge |
+| `audience` | Target level, prerequisite knowledge, estimated duration |
 
 ## What it costs
 
-- **Hostinger KVM 2 VPS:** ~£6/month — [get your account here](https://www.hostinger.com/uk?REFERRALCODE=EGBLEWISRZT6)
+- **VPS:** ~£6/month (Hostinger KVM 2 recommended)
 - **Anthropic API:** ~£0.10–£0.50/month for typical use
 - **YouTube Data API:** free
-- **Apify** (transcript fetcher): a few pence/month — [sign up here](https://apify.com?fpr=3ly3yd)
+- **Apify** (transcript fetcher): a few pence/month
 - **Email alerts:** free — sent from your own Gmail
-
-## How it works under the hood
-
-```
-every 10 min:
-  for each channel in channels.yaml:
-    fetch latest 5 video IDs
-    for any new video:
-      pull transcript
-      Claude extracts strategy / rules / risk / timing / executed trades
-      detect strategy shifts vs prior state → changelog
-      re-merge rolling window with recency weighting
-      group similar rules via embedding similarity
-```
-
-### Recency weighting
-
-| Position in window | Weight |
-|---|---|
-| Most recent | 1.00 |
-| -1 | 0.70 |
-| -2 | 0.50 |
-| -3 | 0.35 |
-| -4 | 0.25 |
-
-Effective confidence = `mean(confidence × weight)` across appearances. Rules below 0.30 are dropped.
-
-### Strategy change detection
-
-A shift is logged if:
-- a new rule contradicts an existing high-confidence rule
-- the strategy summary moves >0.35 in semantic distance
-- Claude flags `strategy_shift.changed = true`
 
 ## Repo layout
 
@@ -74,9 +62,9 @@ A shift is logged if:
 auth.py              OAuth flow
 watcher.py           Main 10-min poll loop
 ingest.py            Pull transcript + extract + merge
-extract.py           Claude prompt + JSON schema
+extract.py           Claude prompt + JSON schema (education domain)
 weighting.py         Recency weighting + similarity grouping
-change_detect.py     Strategy-shift detection
+change_detect.py     Knowledge-evolution detection
 store.py             SQLite + markdown IO
 notify.py            Email sender (Gmail SMTP)
 transcript.py        Apify transcript fetcher
