@@ -8,4 +8,6 @@ state.db
 channels/
 .DS_Store
 run_live.log
+retry.log
+.retry.lock
 .test-backup/
