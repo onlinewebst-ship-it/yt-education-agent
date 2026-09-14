@@ -1,4 +1,4 @@
-"""Claude extraction with prompt caching — education/skills domain."""
+"""LLM extraction via OpenAI-compatible API (DeepSeek / OpenRouter) — education/skills domain."""
 
 from __future__ import annotations
 
@@ -6,16 +6,34 @@ import json
 import os
 from pathlib import Path
 
-from anthropic import Anthropic
 from dotenv import dotenv_values
+import httpx
 
 ROOT = Path(__file__).parent
 _ENV = dotenv_values(ROOT / ".env")
-_API_KEY = _ENV.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
-_BASE_URL = _ENV.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com"
-
-MODEL = "claude-opus-4-7"
+_API_KEY = (
+    _ENV.get("OPENAI_API_KEY")
+    or os.environ.get("OPENAI_API_KEY")
+    or _ENV.get("LLM_API_KEY")
+    or os.environ.get("LLM_API_KEY")
+)
+_BASE_URL = (
+    _ENV.get("OPENAI_BASE_URL")
+    or os.environ.get("OPENAI_BASE_URL")
+    or _ENV.get("LLM_BASE_URL")
+    or os.environ.get("LLM_BASE_URL")
+    or "https://openrouter.ai/api/v1"
+)
+_MODEL = (
+    _ENV.get("EXTRACTION_MODEL")
+    or os.environ.get("EXTRACTION_MODEL")
+    or "deepseek/deepseek-v4-flash"
+)
 MAX_TOKENS = 4096
+CHAT_ENDPOINT = "chat/completions"
+# DeepSeek models consume reasoning tokens separately from output tokens.
+# We request extra headroom to ensure complete JSON output.
+_EXTRA_REASONING_TOKENS = 8192
 
 SYSTEM_PROMPT = """You are a knowledge-extraction analyst. You read transcripts of educational YouTube videos and extract structured knowledge: what concepts are taught, what skills are demonstrated, what tools are used, and how the information connects.
 
@@ -89,40 +107,113 @@ Rules:
 - Return JSON only, no markdown fences, no commentary."""
 
 
-def _client() -> Anthropic:
+def _client() -> httpx.Client:
     if not _API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY not found in .env")
-    return Anthropic(api_key=_API_KEY, base_url=_BASE_URL)
+        raise RuntimeError("No API key found. Set OPENAI_API_KEY or LLM_API_KEY in .env")
+    return httpx.Client(
+        base_url=_BASE_URL,
+        headers={
+            "Authorization": f"Bearer {_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        timeout=120.0,
+    )
+
+
+def _llm_call(messages: list[dict], max_tokens: int = MAX_TOKENS) -> str:
+    """Make an OpenAI-compatible chat completion call via httpx.
+    Uses extra-large max_tokens to accommodate DeepSeek's reasoning overhead."""
+    payload = {
+        "model": _MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens + _EXTRA_REASONING_TOKENS,  # headroom for reasoning
+        "stream": False,
+    }
+    with _client() as client:
+        resp = client.post(f"/{CHAT_ENDPOINT}", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+    text = data["choices"][0]["message"]["content"] or ""
+    return text
+
+
+def _extract_json(text: str) -> dict:
+    """Strip markdown fences and parse JSON from LLM response.
+    Falls back to repairing truncated JSON if available."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip().rstrip("`").strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Try repairing truncated JSON (unterminated strings, missing brackets)
+        repaired = _repair_truncated_json(cleaned)
+        if repaired:
+            return json.loads(repaired)
+        raise
+
+
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to repair a JSON string that was truncated mid-output.
+    Closes unterminated strings, arrays, and objects."""
+    # Close unterminated strings
+    result = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            escape = False
+            result.append(ch)
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            result.append(ch)
+            continue
+        if ch == '"' and in_string:
+            in_string = False
+            result.append(ch)
+            continue
+        if ch == '"' and not in_string:
+            in_string = True
+            result.append(ch)
+            continue
+        result.append(ch)
+    if in_string:
+        result.append('"')
+    
+    repaired = "".join(result)
+    
+    # Balance brackets
+    stack = []
+    pairs = {"{": "}", "[": "]", '"': '"'}
+    for ch in repaired:
+        if ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack and stack[-1] == {"}": "{", "]": "["}[ch]:
+                stack.pop()
+    # Close unclosed brackets
+    for opener in reversed(stack):
+        repaired += pairs[opener]
+    
+    return repaired
 
 
 def extract_from_transcript(transcript: str, video_title: str) -> dict:
-    """Send transcript to Claude with system prompt cached. Returns parsed JSON."""
+    """Send transcript to LLM (DeepSeek/OpenRouter). Returns parsed JSON."""
     user = (
         f"Video title: {video_title}\n\n"
         f"Transcript:\n{transcript}\n\n"
         "Extract the structured knowledge JSON now."
     )
-    resp = _client().messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": user}],
-    )
-    text = "".join(
-        block.text for block in resp.content if hasattr(block, "text")
-    ).strip()
-    if text.startswith("```"):
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip().rstrip("`").strip()
-    return json.loads(text)
+    text = _llm_call([
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user},
+    ])
+    return _extract_json(text)
 
 
 _IMPACT_SYSTEM = """You are a knowledge-base curator. The user runs an agent that watches educational YouTube channels and builds a living knowledge document.
@@ -154,20 +245,9 @@ def summarize_impact(
         + "Write the brief now."
     )
     try:
-        resp = _client().messages.create(
-            model=MODEL,
-            max_tokens=600,
-            system=[
-                {
-                    "type": "text",
-                    "text": _IMPACT_SYSTEM,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": user}],
-        )
-        return "".join(
-            block.text for block in resp.content if hasattr(block, "text")
-        ).strip()
+        return _llm_call([
+            {"role": "system", "content": _IMPACT_SYSTEM},
+            {"role": "user", "content": user},
+        ], max_tokens=600)
     except Exception as exc:
         return f"(impact summary failed: {exc})"
